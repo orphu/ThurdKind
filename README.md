@@ -13,12 +13,16 @@ shape of the machine I put this on.
 
 It will cycle through several effects:
 
-* Color fade. All LEDs a solid color. Slightly modifed from the example. 
+* Color fade. All LEDs a solid color. Slightly modified from the example. 
 It will pick a nice HSV color, but leave out the saturation and only lower
 the value a little to keep the colors nice and bright. 
 
-* Since wave chase. Again, slightly modified from the original to shift the hue up and down with amplitude to give more variety. They also move faster. 
+* Chaser. A simple color chase with variable direction and width. 
 
-* Close Encounter. Mimics the mothership. 
+* Sine wave chase. Again, slightly modified from the original to shift the hue up and down with amplitude to give more variety. They also move faster. 
 
+* Close Encounter. Mimics the mother ship. 
 
+* Quad colors. Each arm of the quad cycles through colors.
+
+* Quad sine chase. A radial pulsing color chase, with a random sparkly effect. 
