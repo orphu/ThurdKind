@@ -1,8 +1,8 @@
 # ThurdKind #
 
-This controls an LDP8806 RGB light strip in patterns resembling the UFOs from 
+This controls an LPD8806 RGB light strip in patterns resembling the UFOs from 
 some movie about aliens and mashed potatoes. This is based on the examples
-from Adafruit's LDP8806 library (which this requires). 
+from Adafruit's LPD8806 library (which this requires). 
 
 https://github.com/adafruit/LPD8806
 
