@@ -174,7 +174,7 @@ void callback() {
     fxIdx[frontImgIdx] = random((sizeof(renderEffect) / sizeof(renderEffect[0])));
     fxIdx[2]           = random((sizeof(renderAlpha)  / sizeof(renderAlpha[0])));
     //transitionTime     = random(30, 181); // 0.5 to 3 second transitions
-    transitionTime     = 30;     
+    transitionTime     = 60;     
     fxVars[frontImgIdx][0] = 0; // Effect not yet initialized
     fxVars[2][0]           = 0; // Transition not yet initialized
   } 
@@ -342,10 +342,6 @@ void renderEffect04(byte idx) {
     fxVars[idx][1] = hsv2rgb(random(1536),255, random(128)+127);
     // Color 2
     fxVars[idx][2] = hsv2rgb(random(1536),255, random(128)+127);
-    // Color 2
-    fxVars[idx][3] = hsv2rgb(random(1536),255, random(128)+127);
-    // Color 4
-    fxVars[idx][4] = hsv2rgb(random(1536),255, random(128)+127);
     // Countdown delay 
     fxVars[idx][5] = -40;
     // Current counter
@@ -363,9 +359,9 @@ void renderEffect04(byte idx) {
     } else if (foo == 1) {
       color = fxVars[idx][2];
     } else if (foo == 2) {
-      color = fxVars[idx][3];
+      color = fxVars[idx][1];
     } else {
-      color = fxVars[idx][4];
+      color = fxVars[idx][2];
     }
     *ptr++ = color >> 16; 
     *ptr++ = color >> 8; 
@@ -374,7 +370,7 @@ void renderEffect04(byte idx) {
   fxVars[idx][6] += 1;
   if (fxVars[idx][6] >= 0) {
     fxVars[idx][6] = fxVars[idx][5];
-    fxVars[idx][random(5)] = hsv2rgb(random(1536),255, random(4)*85);
+    fxVars[idx][random(3)] = hsv2rgb(random(1536),255, random(3)*127);
   }
 }
 
