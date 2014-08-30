@@ -10,14 +10,19 @@
 #include "LPD8806.h"
 #include "TimerOne.h"
 
-// Button pin
-const int buttonPin = 3;
+// Button pin.
+const int buttonPin = 4;
 
-// Onboard LED pin
+// Onboard LED pin.
 const int ledPin = 11;
 
-// A variable to store button state
-int buttonState = 0; 
+// A variable to store button state.
+int buttonState = LOW; 
+int oldButtonState = LOW; 
+
+// Used for debouncing the button input.
+long lastDebounceTime = 0;  // The last time the output pin was toggled.
+long debounceDelay = 50;    // The debounce time; increase if the output flickers.
 
 // Declare the number of pixels in strand; 32 = 32 pixels in a row.  The
 // LED strips have 32 LEDs per meter, but you can extend or cut the strip.
@@ -44,16 +49,18 @@ LPD8806 strip = LPD8806(numPixels);
 // combined; it represents the opacity of the front image.  When the
 // transition completes, the "front" then becomes the "back," a new front
 // is chosen, and the process repeats.
-byte imgData[2][numPixels * 3], // Data for 2 strips worth of imagery
-alphaMask[numPixels],      // Alpha channel for compositing images
-backImgIdx = 0,            // Index of 'back' image (always 0 or 1)
-fxIdx[3];                  // Effect # for back & front images + alpha
-int  fxVars[3][50],             // Effect instance variables (explained later)
-tCounter   = -1,           // Countdown to next transition
-transitionTime;            // Duration (in frames) of current transition
+byte imgData[2][numPixels * 3], // Data for 2 strips worth of imagery.
+alphaMask[numPixels],           // Alpha channel for compositing images.
+fxIdx[3];                       // Effect # for back & front images + alpha.
+int  fxVars[3][50],             // Effect instance variables. (explained later)
+tCounter   = -1,                // Countdown to next transition. Start with no hold and trasition right away.
+transitionTime = 40,            // Duration (in frames) of current transition.
+frustration = 0;                // Current frustration level. Use to color the strip in effect 00.
+const int maxFrustration = 6;   // Maximum frustration level
 
 // function prototypes, leave these be :)
 void renderEffect00(byte idx);
+void renderEffect01(byte idx);
 void renderAlpha00(void);
 void callback();
 byte gamma(byte x);
@@ -65,7 +72,8 @@ char fixCos(int angle);
 // each of these appears later in this file.  Just a few to start with...
 // simply append new ones to the appropriate list here:
 void (*renderEffect[])(byte) = {
-  renderEffect00
+  renderEffect00,
+  renderEffect01
 },
 (*renderAlpha[])(void)  = {
   renderAlpha00 
@@ -74,10 +82,10 @@ void (*renderEffect[])(byte) = {
 // ---------------------------------------------------------------------------
 
 void setup() {
-  // initialize the LED pin as an output:
+  // initialize the LED pin as an output.
   pinMode(ledPin, OUTPUT);      
   
-  // initialize the pushbutton pin as an input:
+  // initialize the pushbutton pin as an input.
   pinMode(buttonPin, INPUT);     
   
   // Start up the LED strip.  Note that strip.show() is NOT called here --
@@ -87,8 +95,18 @@ void setup() {
 
   // Initialize random number generator from a floating analog input.
   randomSeed(analogRead(0));
-  memset(imgData, 0, sizeof(imgData)); // Clear image data
-  fxVars[backImgIdx][0] = 1;           // Mark back image as initialized
+  
+  // Clear image data.
+  memset(imgData, 0, sizeof(imgData));
+  
+  // Clear fx vars data.
+  memset(fxVars, 0, sizeof(fxVars));
+
+  // Setup render effects. 0 is the color version, 1 is the "off" version.
+  fxIdx[0] = 0;
+  fxIdx[1] = sizeof(renderEffect[0]);
+  // Only one transition function.
+  fxIdx[2] = 0;
 
   // Timer1 is used so the strip will update at a known fixed frame rate.
   // Each effect rendering function varies in processing complexity, so
@@ -99,21 +117,46 @@ void setup() {
 }
 
 void loop() {
-  // Handle the LED nutton indicator
-  // Read the button pin
-  buttonState = digitalRead(buttonPin);
-/*
-  // check if the pushbutton is pressed.
-  // if it is, the buttonState is HIGH:
-  if (buttonState == HIGH) {     
-    // turn LED on:    
-    digitalWrite(ledPin, HIGH);  
-  } 
-  else {
-    // turn LED off:
-    digitalWrite(ledPin, LOW); 
+  // read the state of the button into a local variable.
+  int reading = digitalRead(buttonPin);
+  
+  // The onboard LED shows the state of the button at all times.
+  digitalWrite(ledPin, reading); 
+  
+  // If the button is dpressed, reset the hold time and light the strip.
+  if (reading == HIGH) {
+    tCounter = -40;
   }
-  */
+  
+  // check to see if you just pressed the button 
+  // (i.e. the input went from LOW to HIGH),  and you've waited 
+  // long enough since the last press to ignore any noise:  
+
+  // If the switch changed, due to noise or pressing:
+  if (reading != oldButtonState) {
+    // reset the debouncing timer.
+    lastDebounceTime = millis();
+  }
+  
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    // whatever the reading is at, it's been there for longer
+    // than the debounce delay, so take it as the actual current state:
+
+    // if the button state has changed, save it to buttonState.
+    if (reading != buttonState) {
+      buttonState = reading;
+
+      // Increase the frustration level if the button is pressed.
+      if (buttonState == HIGH) {
+        frustration = (frustration >= maxFrustration) ? maxFrustration : frustration + 1;
+        // re-initialize the render effect to pick up the new color.
+        fxVars[0][0] = 0; 
+      } 
+    }
+  }
+  
+  // Remember the last reading for the next iteration.
+  oldButtonState = reading;
 }
 
 // Timer1 interrupt handler.  Called at equal intervals; 60 Hz by default.
@@ -126,21 +169,20 @@ void callback() {
   // unevenness would be apparent if show() were called at the end.
   strip.show();
 
-  byte frontImgIdx = 1 - backImgIdx,
-  *backPtr    = &imgData[backImgIdx][0], r, g, b;
+  byte *backPtr = &imgData[0][0], r, g, b;
   int  i;
 
   // Always render back image based on current effect index:
-  (*renderEffect[fxIdx[backImgIdx]])(backImgIdx);
+  (*renderEffect[fxIdx[0]])(0);
 
   // Front render and composite only happen during transitions...
   if(tCounter > 0) {
     // Transition in progress
-    byte *frontPtr = &imgData[frontImgIdx][0];
+    byte *frontPtr = &imgData[1][0];
     int  alpha, inv;
 
     // Render front image and alpha mask based on current effect indices...
-    (*renderEffect[fxIdx[frontImgIdx]])(frontImgIdx);
+    (*renderEffect[fxIdx[1]])(1);
     (*renderAlpha[fxIdx[2]])();
 
     // ...then composite front over back:
@@ -171,18 +213,11 @@ void callback() {
   // Count up to next transition (or end of current one):
   tCounter++;
   if(tCounter == 0) { // Transition start
-    // Randomly pick next image effect and alpha effect indices:
-    fxIdx[frontImgIdx] = random((sizeof(renderEffect) / sizeof(renderEffect[0])));
-    fxIdx[2]           = random((sizeof(renderAlpha)  / sizeof(renderAlpha[0])));
-    //transitionTime     = random(30, 181); // 0.5 to 3 second transitions
-    transitionTime     = 60;     
-    fxVars[frontImgIdx][0] = 0; // Effect not yet initialized
-    fxVars[2][0]           = 0; // Transition not yet initialized
+    fxVars[2][0] = 0; // Initialize alpha transition.
   } 
   else if(tCounter >= transitionTime) { // End transition
-    fxIdx[backImgIdx] = fxIdx[frontImgIdx]; // Move front effect index to back
-    backImgIdx        = 1 - backImgIdx;     // Invert back index
-    tCounter          = -180 - random(180); // Hold image 3 to 6 seconds
+    tCounter = transitionTime; // park in effect 01 until we see a new button press.
+    frustration = 0; // cool down the frustration level to zero.
   }
 }
 
@@ -201,14 +236,11 @@ void callback() {
 // each transition, the corresponding set of fxVars, being keyed to the same
 // indexes, are automatically carried with them.
 
-// Simplest rendering effect: fill entire image with solid color.
-//
-// TGL - 20120407
-// Modified to use a pure hue. This avoids white and really dark colors. 
+// Solid color from green to red depending on frustration level.
 void renderEffect00(byte idx) {
   // Only needs to be rendered once, when effect is initialized:
   if(fxVars[idx][0] == 0) {
-    long color = hsv2rgb(random(1536),255, random(128)+127);
+    long color = hsv2rgb(460 - frustration*(460/maxFrustration), 255, 96);
     byte *ptr = &imgData[idx][0];
     for(int i=0; i<numPixels; i++) {
       *ptr++ = color >> 16; 
@@ -217,12 +249,22 @@ void renderEffect00(byte idx) {
     }
     fxVars[idx][0] = 1; // Effect initialized
   }
-  // Override the hold time for this effect. 
-  if (fxVars[idx][0] == 1 && idx == backImgIdx &&  tCounter <= 0) {
-    fxVars[idx][0] = 2;
-    tCounter = -30;
+}
+
+// Render all black pixels. Use this for a fade target
+void renderEffect01(byte idx) {
+  // Only needs to be rendered once, when effect is initialized:
+  if(fxVars[idx][0] == 0) {
+    byte *ptr = &imgData[idx][0];
+    for(int i=0; i<numPixels; i++) {
+      *ptr++ = 0; 
+      *ptr++ = 0; 
+      *ptr++ = 0;
+    }
+    fxVars[idx][0] = 1; // Effect initialized
   }
 }
+
 
 // ---------------------------------------------------------------------------
 // Alpha channel effect rendering functions.  Like the image rendering
