@@ -10,20 +10,12 @@
 #include "LPD8806.h"
 #include "TimerOne.h"
 
-#if defined(USB_SERIAL) || defined(USB_SERIAL_ADAFRUIT)
-// this is for teensyduino support
-int dataPin = 2;
-int clockPin = 1;
-#else 
-// these are the pins we use for the LED belt kit using
-// the Leonardo pinouts
-int dataPin = 16;
-int clockPin = 15;
-#endif
+// Button pin
+const int buttonPin = 3;
 
 // Declare the number of pixels in strand; 32 = 32 pixels in a row.  The
 // LED strips have 32 LEDs per meter, but you can extend or cut the strip.
-const int numPixels = 86;
+const int numPixels = 6;
 // 'const' makes subsequent array declarations possible, otherwise there
 // would be a pile of malloc() calls later.
 
@@ -56,11 +48,6 @@ transitionTime;            // Duration (in frames) of current transition
 
 // function prototypes, leave these be :)
 void renderEffect00(byte idx);
-void renderEffect01(byte idx);
-void renderEffect02(byte idx);
-void renderEffect03(byte idx);
-void renderEffect04(byte idx);
-void renderEffect05(byte idx);
 void renderAlpha00(void);
 void renderAlpha01(void);
 void renderAlpha02(void);
@@ -74,15 +61,7 @@ char fixCos(int angle);
 // each of these appears later in this file.  Just a few to start with...
 // simply append new ones to the appropriate list here:
 void (*renderEffect[])(byte) = {
-  renderEffect00,
-  renderEffect00,
-  renderEffect00,
-  renderEffect00,
-  renderEffect01,
-  renderEffect02,
-  renderEffect03,
-  renderEffect04,
-  renderEffect05
+  renderEffect00
    }
 ,
 (*renderAlpha[])(void)  = {
@@ -223,196 +202,6 @@ void renderEffect00(byte idx) {
   }
 }
 
-// Chaser
-void renderEffect01(byte idx) {
-  if(fxVars[idx][0] == 0) { // Initialize effect?
-    // Color
-    fxVars[idx][1] = hsv2rgb(random(1536),255, random(128)+127);
-    // Frame-to-frame increment (speed) 
-    fxVars[idx][2] = 12;
-    // Sometimes forward, sometimes backward
-    if(random(2) == 0) fxVars[idx][2] = -fxVars[idx][2];
-    // Current position
-    fxVars[idx][3] = random(720); 
-    // Chaser width
-    fxVars[idx][4] = 127 - random(15); 
-    fxVars[idx][0] = 1; // Effect initialized
-  }
-
-  byte *ptr = &imgData[idx][0];
-  int  foo;
-  long color, i;
-  for(long i=0; i<numPixels; i++) {
-    foo = fixSin(fxVars[idx][3] + 720 * i / numPixels);
-    color = (foo >= fxVars[idx][4]) ?
-    hsv2rgb(fxVars[idx][1] + (foo * 4), 254 - (foo / 4), 255) :    
-    0;
-    *ptr++ = color >> 16; 
-    *ptr++ = color >> 8; 
-    *ptr++ = color;
-  }
-  fxVars[idx][3] += fxVars[idx][2];
-}
-
-// Sine wave chase effect
-void renderEffect02(byte idx) {
-  if(fxVars[idx][0] == 0) { // Initialize effect?
-    fxVars[idx][1] = random(1536); // Random hue
-    // Number of repetitions;
-    // any more than 2 per meter just looks too chaotic.
-    // Store as distance around complete belt in half-degree units:
-    fxVars[idx][2] = (1 + random(2 * ((numPixels + 31) / 32))) * 720;
-    // Frame-to-frame increment (speed) -- may be positive or negative,
-    // but magnitude shouldn't be so small as to be boring.  It's generally
-    // still less than a full pixel per frame, making motion very smooth.
-    fxVars[idx][3] = 10 + random(fxVars[idx][1]) / numPixels;
-    // Reverse direction half the time.
-    if(random(2) == 0) fxVars[idx][3] = -fxVars[idx][3];
-    fxVars[idx][4] = 0; // Current position
-    fxVars[idx][0] = 1; // Effect initialized
-  }
-
-  byte *ptr = &imgData[idx][0];
-  int  foo;
-  long color, i;
-  for(long i=0; i<numPixels; i++) {
-    foo = fixSin(fxVars[idx][4] + fxVars[idx][2] * i / numPixels);
-    // Peaks of sine wave are white, troughs are black, mid-range
-    // values are pure hue (100% saturated).
-    color = (foo >= 0) ?
-    //hsv2rgb(fxVars[idx][1], 254 - (foo * 2), 255) :
-    hsv2rgb(fxVars[idx][1] + (foo * 2), 254 - (foo / 2), 255) :    
-    hsv2rgb(fxVars[idx][1] - (foo * 2), 255, 254 + foo * 2);
-    *ptr++ = color >> 16; 
-    *ptr++ = color >> 8; 
-    *ptr++ = color;
-  }
-  fxVars[idx][4] += fxVars[idx][3];
-}
-
-// Close Encounter
-void renderEffect03(byte idx) {
-  if(fxVars[idx][0] == 0) { // Initialize effect?
-    // Position of the color note
-    fxVars[idx][2] = random(720);
-    // Note color
-    fxVars[idx][1] = fxVars[idx][2] * 2.13; 
-    // Frame-to-frame increment (speed) of the background sine pattern
-    fxVars[idx][3] = 5;
-    // Current position of the bg sine pattern
-    fxVars[idx][4] = 0; 
-    // Amplitude of the color note
-    fxVars[idx][5] = 0;
-    // Amplitude decay speed of the color note
-    fxVars[idx][6] = 4;
-    fxVars[idx][0] = 1; // Effect initialized
-  }
-
-  byte *ptr = &imgData[idx][0];
-  int  bgsine, note, j;
-  long color, i;
-  for(i=0; i<numPixels; i++) {
-    bgsine = fixSin(fxVars[idx][4] + 10800 * i / numPixels);
-    //bgsine = max(fixSin(fxVars[idx][4] + (15 * 720) * i / numPixels), 
-    //      fixSin(-fxVars[idx][4] + (15 * 720) * i / numPixels));
-    bgsine = max(0, (bgsine + 100) / 6);
-      
-    note = fixCos(fxVars[idx][2] + 720 * i / numPixels);
-    note = max(0, note * 2 - 127 + fxVars[idx][5]);
-    color = hsv2rgb(fxVars[idx][1], 255, note);    
-
-    *ptr++ = max((byte)(bgsine), (byte)(color >> 16)); 
-    *ptr++ = max((byte)(bgsine), (byte)(color >> 8)); 
-    *ptr++ = max((byte)(bgsine), (byte)(color));
-  }
-
-  fxVars[idx][4] += fxVars[idx][3];
-  fxVars[idx][5] -= fxVars[idx][6];
-  if (fxVars[idx][5] <= -127) {
-    fxVars[idx][5] = 0;
-    fxVars[idx][2] = random(720);
-    fxVars[idx][1] = fxVars[idx][2] * 2.13;
-  }
-}
-
-// Quad colors
-void renderEffect04(byte idx) {
-  if(fxVars[idx][0] == 0) { // Initialize effect?
-    // Color 1
-    fxVars[idx][1] = hsv2rgb(random(1536),255, random(128)+127);
-    // Color 2
-    fxVars[idx][2] = hsv2rgb(random(1536),255, random(128)+127);
-    // Countdown delay 
-    fxVars[idx][5] = -40;
-    // Current counter
-    fxVars[idx][6] = fxVars[idx][5]; 
-    fxVars[idx][0] = 1; // Effect initialized
-  }
-
-  byte *ptr = &imgData[idx][0];
-  int  foo;
-  long color, i;
-  for(long i=0; i<numPixels; i++) {
-    foo = i * 4 / numPixels;
-    if (foo == 0) {
-      color = fxVars[idx][1];
-    } else if (foo == 1) {
-      color = fxVars[idx][2];
-    } else if (foo == 2) {
-      color = fxVars[idx][1];
-    } else {
-      color = fxVars[idx][2];
-    }
-    *ptr++ = color >> 16; 
-    *ptr++ = color >> 8; 
-    *ptr++ = color;
-  }
-  fxVars[idx][6] += 1;
-  if (fxVars[idx][6] >= 0) {
-    fxVars[idx][6] = fxVars[idx][5];
-    fxVars[idx][random(3)] = hsv2rgb(random(1536),255, random(3)*127);
-  }
-}
-
-// Quad sine chase
-void renderEffect05(byte idx) {
-  if(fxVars[idx][0] == 0) { // Initialize effect?
-    fxVars[idx][1] = random(1536); // Random hue
-    // Number of repetitions;
-    fxVars[idx][2] = 3060;
-    // Frame-to-frame increment (speed) 
-    fxVars[idx][3] = 5 + random(fxVars[idx][1]) / numPixels;
-    // Reverse direction half the time.
-    if(random(2) == 0) fxVars[idx][3] = -fxVars[idx][3];
-    fxVars[idx][4] = 0; // Current position
-    fxVars[idx][5] = 1 + random(5); // Sparkle
-    fxVars[idx][0] = 1; // Effect initialized
-  }
-
-  byte *ptr = &imgData[idx][0];
-  int  foo, quad;
-  long color, i, i2;
-  for(long i=0; i<numPixels; i++) {
-    i2 = i % (numPixels / 8);
-    quad = (i * 8 / numPixels) % 2;
-    if (quad == 0) {
-      foo = fixSin(fxVars[idx][4] + fxVars[idx][2] * i / numPixels);
-    } else {
-      foo = fixSin(fxVars[idx][4] + fxVars[idx][2] * (numPixels - i) / numPixels);
-    }
-    // Peaks of sine wave are white, troughs are black, mid-range
-    // values are pure hue (100% saturated).
-    color = (foo >= 0) ?
-    //hsv2rgb(fxVars[idx][1], 254 - (foo * 2), 255) :
-    hsv2rgb(fxVars[idx][1] + (foo * 3), 254 - foo, 255) :    
-    hsv2rgb(fxVars[idx][1] - (foo * 3), 255, 254 + foo * fxVars[idx][5]);
-    *ptr++ = color >> 16; 
-    *ptr++ = color >> 8; 
-    *ptr++ = color;
-  }
-  fxVars[idx][4] += fxVars[idx][3];
-}
-
 // ---------------------------------------------------------------------------
 // Alpha channel effect rendering functions.  Like the image rendering
 // effects, these are typically parametrically-generated...but unlike the
@@ -427,57 +216,6 @@ void renderAlpha00(void) {
   byte fade = 255L * tCounter / transitionTime;
   for(int i=0; i<numPixels; i++) alphaMask[i] = fade;
 }
-
-// Straight left-to-right or right-to-left wipe
-void renderAlpha01(void) {
-  long x, y, b;
-  if(fxVars[2][0] == 0) {
-    fxVars[2][1] = random(1, numPixels); // run, in pixels
-    fxVars[2][2] = (random(2) == 0) ? 255 : -255; // rise
-    fxVars[2][0] = 1; // Transition initialized
-  }
-
-  b = (fxVars[2][2] > 0) ?
-  (255L + (numPixels * fxVars[2][2] / fxVars[2][1])) *
-    tCounter / transitionTime - (numPixels * fxVars[2][2] / fxVars[2][1]) :
-  (255L - (numPixels * fxVars[2][2] / fxVars[2][1])) *
-    tCounter / transitionTime;
-  for(x=0; x<numPixels; x++) {
-    y = x * fxVars[2][2] / fxVars[2][1] + b; // y=mx+b, fixed-point style
-    if(y < 0)         alphaMask[x] = 0;
-    else if(y >= 255) alphaMask[x] = 255;
-    else              alphaMask[x] = (byte)y;
-  }
-}
-
-// Dither reveal between images
-void renderAlpha02(void) {
-  long fade;
-  int  i, bit, reverse, hiWord;
-
-  if(fxVars[2][0] == 0) {
-    // Determine most significant bit needed to represent pixel count.
-    int hiBit, n = (numPixels - 1) >> 1;
-    for(hiBit=1; n; n >>=1) hiBit <<= 1;
-    fxVars[2][1] = hiBit;
-    fxVars[2][0] = 1; // Transition initialized
-  }
-
-  for(i=0; i<numPixels; i++) {
-    // Reverse the bits in i for ordered dither:
-    for(reverse=0, bit=1; bit <= fxVars[2][1]; bit <<= 1) {
-      reverse <<= 1;
-      if(i & bit) reverse |= 1;
-    }
-    fade   = 256L * numPixels * tCounter / transitionTime;
-    hiWord = (fade >> 8);
-    if(reverse == hiWord)     alphaMask[i] = (fade & 255); // Remainder
-    else if(reverse < hiWord) alphaMask[i] = 255;
-    else                      alphaMask[i] = 0;
-  }
-}
-
-// TO DO: Add more transitions here...triangle wave reveal, etc.
 
 // ---------------------------------------------------------------------------
 // Assorted fixed-point utilities below this line.  Not real interesting.
