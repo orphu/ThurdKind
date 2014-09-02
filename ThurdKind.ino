@@ -1,20 +1,34 @@
-// ThurdKind 
+// UX-LAB firmware 
 // Animates a LPD8806 based RGB LED strip with patterns. Based on the example
 // by Adafruit! 
 //
-// REQUIRES TIMER1 LIBRARY: http://www.arduino.cc/playground/Code/Timer1
-// ALSO REQUIRES LPD8806 LIBRARY: https://github.com/adafruit/LPD8806
+// REQUIRES TIMER1 LIBRARY (included with Teensy install): http://www.arduino.cc/playground/Code/Timer1
+// ALSO REQUIRES LPD8806 LIBRARY (not included): https://github.com/adafruit/LPD8806
 
 #include <avr/pgmspace.h>
 #include "SPI.h"
 #include "LPD8806.h"
 #include "TimerOne.h"
 
+// ---------------------------------------------------------------------------
+// Config section
+
+// Pins are based on Teensy 2.0
 // Button pin.
 const int buttonPin = 4;
 
 // Onboard LED pin.
 const int ledPin = 11;
+
+// Declare the number of pixels in strand; 32 = 32 pixels in a row.  The
+// LED strips have 32 LEDs per meter, but you can extend or cut the strip.
+const int numPixels = 6;
+
+// Maximum frustration level. This will translate to the number of color bands.
+const int maxFrustration = 6; 
+
+// ---------------------------------------------------------------------------
+// Global variables
 
 // A variable to store button state.
 int buttonState = LOW; 
@@ -23,12 +37,6 @@ int oldButtonState = LOW;
 // Used for debouncing the button input.
 long lastDebounceTime = 0;  // The last time the output pin was toggled.
 long debounceDelay = 50;    // The debounce time; increase if the output flickers.
-
-// Declare the number of pixels in strand; 32 = 32 pixels in a row.  The
-// LED strips have 32 LEDs per meter, but you can extend or cut the strip.
-const int numPixels = 6;
-// 'const' makes subsequent array declarations possible, otherwise there
-// would be a pile of malloc() calls later.
 
 // Instantiate LED strip; arguments are the total number of pixels in strip,
 // the data pin number and clock pin number:
@@ -56,17 +64,14 @@ int  fxVars[3][50],             // Effect instance variables. (explained later)
 tCounter   = -1,                // Countdown to next transition. Start with no hold and trasition right away.
 transitionTime = 40,            // Duration (in frames) of current transition.
 frustration = 0;                // Current frustration level. Use to color the strip in effect 00.
-const int maxFrustration = 6;   // Maximum frustration level
 
 // function prototypes, leave these be :)
-void renderEffect00(byte idx);
-void renderEffect01(byte idx);
-void renderAlpha00(void);
+void renderEffect00(byte idx);  // Whole strip color based on frsutration.
+void renderEffect01(byte idx);  // All "black" (LEDs off). Used as a tranisition target for the fade.
+void renderAlpha00(void);       // Simple cross fade transition.   
 void callback();
 byte gamma(byte x);
 long hsv2rgb(long h, byte s, byte v);
-char fixSin(int angle);
-char fixCos(int angle);
 
 // List of image effect and alpha channel rendering functions; the code for
 // each of these appears later in this file.  Just a few to start with...
@@ -99,10 +104,10 @@ void setup() {
   // Clear image data.
   memset(imgData, 0, sizeof(imgData));
   
-  // Clear fx vars data.
+  // Clear instance variables data.
   memset(fxVars, 0, sizeof(fxVars));
 
-  // Setup render effects. 0 is the color version, 1 is the "off" version.
+  // Setup render effects. 00 is the color version, 01 is the "off" version.
   fxIdx[0] = 0;
   fxIdx[1] = sizeof(renderEffect[0]);
   // Only one transition function.
@@ -123,12 +128,15 @@ void loop() {
   // The onboard LED shows the state of the button at all times.
   digitalWrite(ledPin, reading); 
   
-  // If the button is dpressed, reset the hold time and light the strip.
+  // If the button is depressed, reset the hold time and light the strip.
   if (reading == HIGH) {
     tCounter = -40;
   }
   
-  // check to see if you just pressed the button 
+  // We need to "debounce" the button input to make sure we increment
+  // color cleanly. 
+  //
+  // Check to see if you just pressed the button 
   // (i.e. the input went from LOW to HIGH),  and you've waited 
   // long enough since the last press to ignore any noise:  
 
@@ -169,6 +177,7 @@ void callback() {
   // unevenness would be apparent if show() were called at the end.
   strip.show();
 
+  // Local variables.
   byte *backPtr = &imgData[0][0], r, g, b;
   int  i;
 
@@ -240,6 +249,8 @@ void callback() {
 void renderEffect00(byte idx) {
   // Only needs to be rendered once, when effect is initialized:
   if(fxVars[idx][0] == 0) {
+    // Color starts at green, and transitiions to red depensing on frustration level.
+    // Brightness is controlled by the value param. 128 is full bright. 
     long color = hsv2rgb(460 - frustration*(460/maxFrustration), 255, 96);
     byte *ptr = &imgData[idx][0];
     for(int i=0; i<numPixels; i++) {
@@ -251,7 +262,7 @@ void renderEffect00(byte idx) {
   }
 }
 
-// Render all black pixels. Use this for a fade target
+// Render all black pixels (LEDs off). Used for a fade target
 void renderEffect01(byte idx) {
   // Only needs to be rendered once, when effect is initialized:
   if(fxVars[idx][0] == 0) {
@@ -411,27 +422,3 @@ PROGMEM prog_char sineTable[181]  = {
   125,125,126,126,126,126,126,126,126,127,127,127,127,127,127,127,
   127,127,127,127,127
 };
-
-char fixSin(int angle) {
-  angle %= 720;               // -719 to +719
-  if(angle < 0) angle += 720; //    0 to +719
-  return (angle <= 360) ?
-  pgm_read_byte(&sineTable[(angle <= 180) ?
-  angle          : // Quadrant 1
-  (360 - angle)]) : // Quadrant 2
-  -pgm_read_byte(&sineTable[(angle <= 540) ?
-  (angle - 360)   : // Quadrant 3
-  (720 - angle)]) ; // Quadrant 4
-}
-
-char fixCos(int angle) {
-  angle %= 720;               // -719 to +719
-  if(angle < 0) angle += 720; //    0 to +719
-  return (angle <= 360) ?
-  ((angle <= 180) ?  pgm_read_byte(&sineTable[180 - angle])  : // Quad 1
-  -pgm_read_byte(&sineTable[angle - 180])) : // Quad 2
-  ((angle <= 540) ? -pgm_read_byte(&sineTable[540 - angle])  : // Quad 3
-  pgm_read_byte(&sineTable[angle - 540])) ; // Quad 4
-}
-
-
