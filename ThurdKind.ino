@@ -11,7 +11,7 @@
 #include "TimerOne.h"
 
 // ---------------------------------------------------------------------------
-// Config section
+// Config section. Adjust as needed!
 
 // Pins are based on Teensy 2.0
 // Button pin.
@@ -20,33 +20,49 @@ const int buttonPin = 4;
 // Onboard LED pin.
 const int ledPin = 11;
 
-// Declare the number of pixels in strand; 32 = 32 pixels in a row.  The
-// LED strips have 32 LEDs per meter, but you can extend or cut the strip.
+// Declare the number of pixels in the LED strip.
 const int numPixels = 6;
 
-// Maximum frustration level. This will translate to the number of color bands.
-const int maxFrustration = 6; 
+// Hold time. (in 10ths of a second)
+// How long to hold the color and full brightness before
+// the transition starts. Total time will be holdTime + transitionTime.
+const int holdTime = 30;
+
+// Transition time. (in 10ths of a second)
+// How long it takes to fade to black.
+const int transitionTime = 50;
+
+// Maximum frustration level. 
+// This will translate to the number of color bands and the number of 
+// times the user needs to hit the button to reach maximum frustration level.
+const int maxFrustration = 7; 
+
+// The debounce time for button input (ms).
+// Increase if the button pickes up extra presses.
+// Decrease if it misses rapid button presses.
+const long debounceDelay = 30;  
+
+// Button hold time (ms).
+// How long must the user hold the button before increasing frustration level.
+const long buttonHoldTime = 250;
 
 // ---------------------------------------------------------------------------
-// Global variables
+// Global variables.
 
-// A variable to store button state.
+// Variables to store button state.
 int buttonState = LOW; 
 int oldButtonState = LOW; 
 
 // Used for debouncing the button input.
-long lastDebounceTime = 0;  // The last time the output pin was toggled.
-long debounceDelay = 50;    // The debounce time; increase if the output flickers.
+// The last time the input was toggled.
+long lastDebounceTime = 0; 
 
 // Instantiate LED strip; arguments are the total number of pixels in strip,
-// the data pin number and clock pin number:
-//LPD8806 strip = LPD8806(numPixels, dataPin, clockPin);
-
-// You can also use hardware SPI for ultra-fast writes by omitting the data
+// Uses hardware SPI for ultra-fast writes by omitting the data
 // and clock pin arguments.  This is faster, but the data and clock are then
 // fixed to very specific pin numbers: on Arduino 168/328, data = pin 11,
 // clock = pin 13.  On Mega, data = pin 51, clock = pin 52. On teensy
-// data = pin B2, clock = pin B1.
+// data = pin 2 (B2), clock = pin 1 (B1).
 LPD8806 strip = LPD8806(numPixels);
 
 // Principle of operation: at any given time, the LEDs depict an image or
@@ -60,22 +76,20 @@ LPD8806 strip = LPD8806(numPixels);
 byte imgData[2][numPixels * 3], // Data for 2 strips worth of imagery.
 alphaMask[numPixels],           // Alpha channel for compositing images.
 fxIdx[3];                       // Effect # for back & front images + alpha.
-int  fxVars[3][50],             // Effect instance variables. (explained later)
+int  fxVars[3][5],              // Effect instance variables. (explained later)
 tCounter   = -1,                // Countdown to next transition. Start with no hold and trasition right away.
-transitionTime = 40,            // Duration (in frames) of current transition.
 frustration = 0;                // Current frustration level. Use to color the strip in effect 00.
 
 // function prototypes, leave these be :)
 void renderEffect00(byte idx);  // Whole strip color based on frsutration.
 void renderEffect01(byte idx);  // All "black" (LEDs off). Used as a tranisition target for the fade.
 void renderAlpha00(void);       // Simple cross fade transition.   
-void callback();
-byte gamma(byte x);
-long hsv2rgb(long h, byte s, byte v);
+void callback();                // Callback function to run the strip.
+byte gamma(byte x);             // Gamma correction function.
+long hsv2rgb(long h, byte s, byte v);  // HSV to RGB conversion function.
 
 // List of image effect and alpha channel rendering functions; the code for
-// each of these appears later in this file.  Just a few to start with...
-// simply append new ones to the appropriate list here:
+// each of these appears later in this file.  
 void (*renderEffect[])(byte) = {
   renderEffect00,
   renderEffect01
@@ -85,6 +99,7 @@ void (*renderEffect[])(byte) = {
 };
 
 // ---------------------------------------------------------------------------
+// Functions start.
 
 void setup() {
   // initialize the LED pin as an output.
@@ -97,9 +112,6 @@ void setup() {
   // the callback function will be invoked immediately when attached, and
   // the first thing the calback does is update the strip.
   strip.begin();
-
-  // Initialize random number generator from a floating analog input.
-  randomSeed(analogRead(0));
   
   // Clear image data.
   memset(imgData, 0, sizeof(imgData));
@@ -129,15 +141,16 @@ void loop() {
   digitalWrite(ledPin, reading); 
   
   // If the button is depressed, reset the hold time and light the strip.
+  // No need to debounce this. We want it to respond right away.
   if (reading == HIGH) {
-    tCounter = -40;
+    tCounter = -holdTime;
   }
   
   // We need to "debounce" the button input to make sure we increment
   // color cleanly. 
   //
-  // Check to see if you just pressed the button 
-  // (i.e. the input went from LOW to HIGH),  and you've waited 
+  // Check to see if the user just pressed the button 
+  // (i.e. the input went from LOW to HIGH),  and we've waited 
   // long enough since the last press to ignore any noise:  
 
   // If the switch changed, due to noise or pressing:
@@ -150,12 +163,24 @@ void loop() {
     // whatever the reading is at, it's been there for longer
     // than the debounce delay, so take it as the actual current state:
 
+    // If buttonState is HIGH and lastDebounceTime is a long time ago,
+    // then the user is holding the button down.
+    if (buttonState == HIGH && (millis()-lastDebounceTime)%buttonHoldTime == 0) {
+      // Increase frstration level.
+      frustration = (frustration >= maxFrustration) ? maxFrustration : frustration + 1;
+      // re-initialize the render effect to pick up the new color.
+      fxVars[0][0] = 0;
+      // Reset the debounce time so we can wait some more.
+      lastDebounceTime = millis();
+    }
+    
     // if the button state has changed, save it to buttonState.
     if (reading != buttonState) {
       buttonState = reading;
 
-      // Increase the frustration level if the button is pressed.
+      // Did the button go from not pressed to pressed?
       if (buttonState == HIGH) {
+        // Increase frstration level.
         frustration = (frustration >= maxFrustration) ? maxFrustration : frustration + 1;
         // re-initialize the render effect to pick up the new color.
         fxVars[0][0] = 0; 
@@ -237,7 +262,7 @@ void callback() {
 // (but with different parameters), a distinct block of parameter memory is
 // required for each image.  The 'fxVars' array is a two-dimensional array
 // of integers, where the major axis is either 0 or 1 to represent the two
-// images, while the minor axis holds 50 elements -- this is working scratch
+// images, while the minor axis holds 5 elements -- this is working scratch
 // space for the effect code to preserve its "state."  The meaning of each
 // element is generally unique to each rendering effect, but the first element
 // is most often used as a flag indicating whether the effect parameters have
